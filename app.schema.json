@@ -1,0 +1,150 @@
+{
+  "$schema": "http://json-schema.org/draft-04/schema#",
+  "title": "Application Configuration",
+  "description": "Schema for configuring application",
+  "type": "object",
+  "properties": {
+    "app": {
+      "description": "name of the project, which would be used to build the output.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "name of the application",
+          "type": "string"
+        },
+        "defaultPage": {
+          "description": "default page of the application",
+          "type": "string"
+        },
+        "apiRoute": {
+          "description": "api route for the application",
+          "type": "string"
+        },
+        "workers": {
+          "description": "number of worker threads to run",
+          "type": "integer"
+        },
+        "locations": {
+          "description": "locations for resources on the server",
+          "type": "object",
+          "properties": {
+            "docLocation": {
+              "description": "location where static content is stored",
+              "type": "string"
+            },
+            "uploadLocation": {
+              "description": "location where uploaded files to be stored",
+              "type": "string"
+            },
+            "logLocation": {
+              "description": "location where log files to be stored",
+              "type": "string"
+            }
+          },
+          "required": [ "docLocation", "logLocation" ]
+        }
+      },
+      "required": [
+        "name",
+        "defaultPage",
+        "apiRoute",
+        "workers",
+        "locations"
+      ],
+      "additionalProperties": false
+    },
+    "net": {
+      "description": "ip address & port to listen on, if tls is needed",
+      "type": "object",
+      "properties": {
+        "ip": {
+          "description": "ip address",
+          "type": "string"
+        },
+        "port": {
+          "description": "port number",
+          "type": "integer"
+        },
+        "nodelay": {
+          "description": "set true to configure no delay",
+          "type": "boolean"
+        },
+        "nagle": {
+          "description": "set tru to disable nagle algorithm",
+          "type": "boolean"
+        },
+        "tls": {
+          "description": "configure ssl",
+          "type": "object",
+          "properties": {
+            "version":{
+              "description": "tls version to use",
+              "type":"string"
+            },
+            "use": {
+              "description": "set to true if ssl is needed",
+              "type": "boolean"
+            },
+            "cert": {
+              "description": "configure certificate file name",
+              "type": "string"
+            },
+            "key": {
+              "description": "configure key file",
+              "type": "string"
+            }
+          },
+          "required": [ "cert", "key", "use" ],
+          "additionalProperties": false
+        }
+      },
+      "required": [ "ip", "port" ],
+      "additionalProperties": false
+    },
+    "store": {
+      "description": "configure store type & connections",
+      "type": "object",
+      "properties": {
+        "provider": {
+          "description": "type of store to connect, i.e. mysql, mongodb etc.",
+          "type": "object",
+          "properties": {
+            "name": {
+              "description": "name of the provider i.e. mysql/oracle/mongodb",
+              "type": "string"
+            },
+            "type": {
+              "description": "type of store rdbms/document store",
+              "type": "string",
+              "enum": [
+                "documentStore",
+                "rdbms"
+              ],
+              "default": "documentStore"
+            }
+          }
+        },
+        "host": {
+          "description": "hostname of the server where store is running",
+          "type": "string"
+        },
+        "port":{
+          "description": "port to connect the store",
+          "type":"integer"
+        },
+        "userid": {
+          "description": "user if to connect",
+          "type": "string"
+        },
+        "passwd": {
+          "description": "pass phrase to connect",
+          "type": "string"
+        }
+      },
+      "required": [ "provider", "host","port", "passwd", "userid" ],
+      "additionalProperties": false
+    }
+  },
+  "required": [ "app", "net" ],
+  "additionalProperties": false
+}

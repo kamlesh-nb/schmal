@@ -9,21 +9,13 @@
 #include <assert.h>
 #include <vector>
 
-#ifdef __unix__
-#include <coroutine.h>
+#include <iostream>
+
+#ifdef _WIN32
+#include <experimental\coroutine>
 #else
-#include <experimental\resumable>
+#include <coroutine.h>
 #endif
-
-#define WIN32_LEAN_AND_MEAN
-#include <ws2tcpip.h>
-#include <winsock2.h>
-#include <stdio.h>
-#include <windows.h>
-
-// Need to link with Ws2_32.lib
-#pragma comment(lib, "Ws2_32.lib")
-
 
 
 namespace awaitio
@@ -528,8 +520,7 @@ namespace awaitio
     promise_t<Iterator, iterator_awaitable_state<Iterator>> promise(begin, end);
     return promise.get_future();
   }
-
-
+     
   template<typename T1, typename S1, typename T2, typename S2>
   auto operator||(future_t<T1, S1>& t1, future_t<T2, S2>& t2)
   {
@@ -541,40 +532,83 @@ namespace awaitio
   {
     return future_of_all(t1, t2);
   }
-  
-  struct io_buffer
-  {
-    char base[16];
-    int len;
+
+  struct async_mr_event_t {
+    async_mr_event_t(bool initval = false) noexcept: m_state(initval ? static_cast<void*>(this) : nullptr) {}
+    ~async_mr_event_t() {
+      assert(
+        m_state.load(std::memory_order_relaxed) == nullptr ||
+        m_state.load(std::memory_order_relaxed) == static_cast<void*>(this));
+    }
+    bool is_set() const noexcept {
+      return m_state.load(std::memory_order_acquire) == static_cast<const void*>(this);
+    }
+    void set() noexcept {
+      void* const c_state = static_cast<void*>(this);
+      void* p_state = m_state.exchange(c_state, std::memory_order_acq_rel);
+      if (p_state != c_state)
+      {
+        auto* current = static_cast<async_event_op_t*>(p_state);
+        while (current != nullptr)
+        {
+          auto* next = current->m_next;
+          current->m_awaiter.resume();
+          current = next;
+        }
+      }
+    }
+    auto operator co_await() const noexcept {
+      return async_event_op_t{ *this };
+    }
+    void reset() noexcept {
+      void* p_state = static_cast<void*>(this);
+      m_state.compare_exchange_strong(p_state, nullptr, std::memory_order_relaxed);
+    }
+    struct async_event_op_t {
+      async_event_op_t(const async_mr_event_t& evt) : m_event(evt) {}
+      bool await_ready() noexcept {
+        return m_event.is_set();
+      }
+      bool await_suspend(std::experimental::coroutine_handle<> awaiter) noexcept {
+        m_awaiter = awaiter;
+        const void* const c_state = static_cast<const void*>(&m_event);
+        void* p_state = m_event.m_state.load(std::memory_order_acquire);
+        do
+        {
+          if (p_state == c_state)
+          {
+            // State is now 'set' no need to suspend.
+            return false;
+          }
+          m_next = static_cast<async_event_op_t*>(p_state);
+        } while (!m_event.m_state.compare_exchange_weak(
+          p_state,
+          static_cast<void*>(this),
+          std::memory_order_release,
+          std::memory_order_acquire));
+        // Successfully queued this waiter to the list.
+        return true;
+      }
+      void await_resume() const noexcept {}
+    private:
+      friend class async_mr_event_t;
+      const async_mr_event_t& m_event;
+      async_event_op_t* m_next;
+      std::experimental::coroutine_handle<> m_awaiter;
+    };
+  private:
+    mutable std::atomic<void*> m_state;
   };
 
-  struct read_buffer : public awaitable_state<void>
-  {
-    io_buffer  _buf;
-    std::size_t  _nread{ 0 };
-
-    ~read_buffer()
-    {
-      if (_buf.base != nullptr)
-        delete[] _buf.base;
-    }
-
-    void set_value(std::size_t nread, const io_buffer* p)
-    {
-      _buf = *p;
-      _nread = nread;
-      awaitable_state<void>::set_value();
-    }
-
-    // The result of awaiting on this will be std::counted_ptr<read_buffer>.
-    counted_ptr<read_buffer> get_value()
-    {
-      return static_cast<counted_awaitable_state<read_buffer>*>(this);
-    }
+  struct task {
+    ~task() {}
+    struct promise_type {
+      task get_return_object() { return task{}; }
+      void return_void() {}
+      bool initial_suspend() { return false; }
+      bool final_suspend() { return false; }
+    };
   };
-
-
-  
 
 
 } // namespace awaituv
