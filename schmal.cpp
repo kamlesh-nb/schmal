@@ -36,22 +36,22 @@ const char ALIGNED(64) uri_a[256] = {
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 };
-const char ALIGNED(16) first_line[] = "\x00 " /* control chars and up to SP */
-                                      "\"\""  /* 0x22 */
-                                      "<<"    /* 0x3c,0x3c */
-                                      ">>"    /* 0x3e,0x3e */
-                                      "\\\\"  /* 0x5c,0x5c */
-                                      "^^"    /* 0x5e,0x5e */
-                                      "{}"    /* 0x7b-0x7d */
+const char ALIGNED(16) first_line[] = "\x00 "     /* control chars and up to SP */
+                                      "\"\""      /* 0x22 */
+                                      "<<"        /* 0x3c,0x3c */
+                                      ">>"        /* 0x3e,0x3e */
+                                      "\\\\"      /* 0x5c,0x5c */
+                                      "^^"        /* 0x5e,0x5e */
+                                      "{}"        /* 0x7b-0x7d */
                                       "\x7f\xff"; /* 0x7f-0xff */
-const char ALIGNED(16) header_name[] = "\x00 "  /* control chars and up to SP */
-                                       "\"\""   /* 0x22 */
-                                       "()"     /* 0x28,0x29 */
-                                       ",,"     /* 0x2c */
-                                       "//"     /* 0x2f */
-                                       ":@"     /* 0x3a-0x40 */
-                                       "[]"     /* 0x5b-0x5d */
-                                       "{\377"; /* 0x7b-0xff */
+const char ALIGNED(16) header_name[] = "\x00 "    /* control chars and up to SP */
+                                       "\"\""     /* 0x22 */
+                                       "()"       /* 0x28,0x29 */
+                                       ",,"       /* 0x2c */
+                                       "//"       /* 0x2f */
+                                       ":@"       /* 0x3a-0x40 */
+                                       "[]"       /* 0x5b-0x5d */
+                                       "{\377";   /* 0x7b-0xff */
 const char ALIGNED(16)
     header_value[] = "\0\010"   /* allow HT */
                      "\012\037" /* allow SP and up to but not including DEL */
@@ -61,9 +61,11 @@ using namespace std;
 using namespace rapidjson;
 namespace fs = std::experimental::filesystem;
 
-namespace schmal {
+namespace schmal
+{
 
-void ERR(const char *msg, int err) {
+void ERR(const char *msg, int err)
+{
 #ifdef _WIN32
   std::cerr << msg << ": " << WSAGetLastError() << std::endl;
   WSACleanup();
@@ -73,10 +75,12 @@ void ERR(const char *msg, int err) {
   assert(err);
 #endif
 }
-struct config_t {
-  struct _net {
-    struct _tls {
-      bool use;
+struct config_t
+{
+  struct _net
+  {
+    struct _tls
+    {
       string version;
       string cert;
       string key;
@@ -87,8 +91,10 @@ struct config_t {
     bool nagle;
     _tls tls;
   };
-  struct _store {
-    struct _provider {
+  struct _store
+  {
+    struct _provider
+    {
       string name;
       string type;
     };
@@ -98,7 +104,8 @@ struct config_t {
     string passwd;
     _provider provider;
   };
-  struct _locations {
+  struct _locations
+  {
     string docLocation;
     string logLocation;
     string uploadLocation;
@@ -111,7 +118,8 @@ struct config_t {
   _net net;
   _store store;
 };
-struct file_t {
+struct file_t
+{
   char *_headers;
   char *_def_headers;
   char *name;
@@ -122,7 +130,8 @@ struct file_t {
   size_t length;
   size_t def_length;
 };
-struct file_cache {
+struct file_cache
+{
   file_cache(string &_path) : path(_path) {}
   void load() {}
   void unload() {}
@@ -132,15 +141,18 @@ private:
   string path;
   map<string, file_t> files;
 };
-struct io_buff_t {
-  io_buff_t(int capacity) {
+struct io_buff_t
+{
+  io_buff_t(int capacity)
+  {
     _base = (char *)malloc(sizeof(char) * capacity);
     _len = capacity;
     _curpos = 0;
     _slab = capacity;
     memset(_base, '\0', _slab);
   }
-  void reset() {
+  void reset()
+  {
     if (_base)
       return;
     _base = (char *)malloc(sizeof(char) * _slab);
@@ -148,17 +160,26 @@ struct io_buff_t {
     _curpos = 0;
     memset(_base, '\0', _slab);
   }
-  void save(char *str, int bytes) {
-    if (_curpos > 0 && _curpos < _slab) {
-      if (_curpos + bytes > _slab) {
+  void save(char *str, int bytes)
+  {
+    if (_curpos > 0 && _curpos < _slab)
+    {
+      if (_curpos + bytes > _slab)
+      {
         _base = (char *)realloc(_base, bytes - _slab);
         memcpy(_base + _curpos, str, bytes);
-      } else {
+      }
+      else
+      {
         memcpy(_base + _curpos, str, bytes);
       }
-    } else if (_curpos == 0) {
+    }
+    else if (_curpos == 0)
+    {
       memcpy(_base + _curpos, str, bytes);
-    } else if (_curpos >= _slab) {
+    }
+    else if (_curpos >= _slab)
+    {
       _base = (char *)realloc(_base, _curpos + bytes);
       memset(_base + _curpos, '\0', bytes);
       memcpy(_base + _curpos - 1, str, bytes);
@@ -168,7 +189,8 @@ struct io_buff_t {
   }
   char *get() { return _base; }
   int length() { return _len; }
-  void clear() {
+  void clear()
+  {
     _curpos = 0;
     _len = 0;
     free(_base);
@@ -178,8 +200,10 @@ private:
   char *_base;
   int _curpos, _slab, _len = 0;
 };
-struct parser {
-  void parse(io_buff_t &buf, request &req) {
+struct parser
+{
+  void parse(io_buff_t &buf, request &req)
+  {
     size_t pret;
 
     buff = buf.get();
@@ -206,10 +230,13 @@ struct parser {
     string name, value;
     int num_zeroes = 0;
     // request headers
-    while (!pret) {
+    while (!pret)
+    {
       pret = find_header_name(buff, len);
-      if (pret) {
-        if (name.empty()) {
+      if (pret)
+      {
+        if (name.empty())
+        {
           name.append(buff, pret);
           move_buff(pret);
           pret = find_header_value(buff, len);
@@ -222,10 +249,13 @@ struct parser {
         }
         pret = 0;
         num_zeroes = 0;
-      } else {
+      }
+      else
+      {
         ++num_zeroes;
         move_buff(1);
-        if (num_zeroes == 4) {
+        if (num_zeroes == 4)
+        {
           break;
         }
       }
@@ -247,17 +277,20 @@ struct parser {
 private:
   char *buff;
   size_t findchar_fast(const char *str, size_t len, const char *ranges,
-                       int ranges_sz, int *found) {
+                       int ranges_sz, int *found)
+  {
     __m128i ranges16 = _mm_loadu_si128((const __m128i *)ranges);
     const char *s = str;
     size_t left = len & ~0xf;
     *found = 0;
-    do {
+    do
+    {
       __m128i b16 = _mm_loadu_si128((const __m128i *)s);
       int r = _mm_cmpestri(ranges16, ranges_sz, b16, 16,
                            _SIDD_LEAST_SIGNIFICANT | _SIDD_CMP_RANGES |
                                _SIDD_UBYTE_OPS);
-      if (r != 16) {
+      if (r != 16)
+      {
         *found = 1;
         return s - str + r;
       }
@@ -266,10 +299,12 @@ private:
     } while (left);
     return s - str;
   }
-  size_t find_first_line(const char *str, size_t len) {
+  size_t find_first_line(const char *str, size_t len)
+  {
     const char *s;
     size_t n = 0;
-    if (len >= 16) {
+    if (len >= 16)
+    {
       int found;
       n = findchar_fast(str, len, first_line, sizeof(first_line) - 1, &found);
       if (found)
@@ -280,10 +315,12 @@ private:
       ++s;
     return s - str;
   }
-  size_t find_header_name(const char *str, size_t len) {
+  size_t find_header_name(const char *str, size_t len)
+  {
     const char *s;
     size_t n = 0;
-    if (len >= 16) {
+    if (len >= 16)
+    {
       int found;
       n = findchar_fast(str, len, header_name, sizeof(header_name) - 1, &found);
       if (found)
@@ -294,10 +331,12 @@ private:
       ++s;
     return s - str;
   }
-  size_t find_header_value(const char *str, size_t len) {
+  size_t find_header_value(const char *str, size_t len)
+  {
     const char *s;
     size_t n = 0;
-    if (len >= 16) {
+    if (len >= 16)
+    {
       int found;
       n = findchar_fast(str, len, header_value, sizeof(header_value) - 1,
                         &found);
@@ -309,17 +348,22 @@ private:
       ++s;
     return s - str;
   }
-  void move_buff(size_t len) {
-    for (size_t i = 0; i < len; ++i) {
+  void move_buff(size_t len)
+  {
+    for (size_t i = 0; i < len; ++i)
+    {
       ++buff;
     }
   }
 };
-struct tcp_stream_t : public stream_t {
+struct tcp_stream_t : public stream_t
+{
   tcp_stream_t(SOCKET sock) : sock(sock) {}
-  void read(io_buff_t &buff) override {
+  void read(io_buff_t &buff) override
+  {
     int bytes;
-    do {
+    do
+    {
       char *data = (char *)malloc(sizeof(char) * 512);
       bytes = ::recv(sock, data, 512, 0);
       if (bytes == SOCKET_ERROR)
@@ -330,13 +374,15 @@ struct tcp_stream_t : public stream_t {
         break;
     } while (bytes > 0);
   }
-  int write(char *data, size_t len) override {
+  int write(char *data, size_t len) override
+  {
     ret = ::send(sock, data, len, 0);
     if (ret == INVALID_SOCKET)
       ERR("send() failed with error", ret);
     return ret;
   }
-  int close() override {
+  int close() override
+  {
     ret = ::closesocket(sock);
     if (ret == INVALID_SOCKET)
       ERR("close failed with error", ret);
@@ -348,7 +394,8 @@ private:
   int ret;
 };
 
-int socket_t::create() {
+int socket_t::create()
+{
 #ifdef _WIN32
   WSADATA wsaData;
   ret = WSAStartup(MAKEWORD(2, 2), &wsaData);
@@ -361,7 +408,8 @@ int socket_t::create() {
     ERR("socket() failed with error", sock);
   return 1;
 }
-int socket_t::bind(string& address, short port) {
+int socket_t::bind(string &address, short port)
+{
   service.sin_family = AF_INET;
   service.sin_addr.s_addr = inet_addr(address.c_str());
   service.sin_port = htons(port);
@@ -370,17 +418,22 @@ int socket_t::bind(string& address, short port) {
     ERR("bind() failed with error", sock);
   return ret;
 }
-int socket_t::listen() {
+int socket_t::listen()
+{
   ret = ::listen(sock, SOMAXCONN);
   if (ret == SOCKET_ERROR)
     ERR("listen() failed with error", ret);
   return ret;
 }
-int socket_t::set_non_blocking(bool _mode) {
+int socket_t::set_non_blocking(bool _mode)
+{
   u_long mode;
-  if (_mode) {
+  if (_mode)
+  {
     mode = 1;
-  } else {
+  }
+  else
+  {
     mode = 0;
   }
   int ret = ioctlsocket(sock, FIONBIO, &mode);
@@ -389,7 +442,8 @@ int socket_t::set_non_blocking(bool _mode) {
 
   return ret;
 }
-int socket_t::set_tcp_no_delay(bool set) {
+int socket_t::set_tcp_no_delay(bool set)
+{
   BOOL bOptVal = set;
   int bOptLen = sizeof(BOOL);
   int iOptVal = 0;
@@ -399,7 +453,8 @@ int socket_t::set_tcp_no_delay(bool set) {
 
   return ret;
 }
-int socket_t::set_tcp_keep_alive(bool set) {
+int socket_t::set_tcp_keep_alive(bool set)
+{
   BOOL bOptVal = set;
   int bOptLen = sizeof(BOOL);
   int iOptVal = 0;
@@ -410,29 +465,35 @@ int socket_t::set_tcp_keep_alive(bool set) {
   return ret;
 }
 
-struct tcp_socket_t : public socket_t {
-  SOCKET accept() {
+struct tcp_socket_t : public socket_t
+{
+  SOCKET accept()
+  {
     SOCKET asock = ::accept(sock, NULL, NULL);
     if (asock == INVALID_SOCKET)
       ERR("accept() failed with error", asock);
     return asock;
   }
   int connect() {}
+
 private:
 };
-struct tls_stream_t : public stream_t {
+struct tls_stream_t : public stream_t
+{
   void read(io_buff_t &buff) override {}
   int write(char *data, size_t len) override { return 0; }
   int close() override { return 0; }
 };
-struct tls_socket_t : public socket_t {
+struct tls_socket_t : public socket_t
+{
   int accept() {}
   int connect() {}
 
 private:
 };
 
-struct request_handler {
+struct request_handler
+{
   request_handler() {}
   void post(stream_t *stream) { _stream = stream; }
 
@@ -441,11 +502,14 @@ private:
   atomic<bool> done;
 };
 
-void response::add_header(string &key, string &value) {
+void response::add_header(string &key, string &value)
+{
   headers.emplace(key, value);
 }
 
-template <typename socket_t> bool server<socket_t>::load_config() {
+template <typename socket_t>
+bool server<socket_t>::load_config()
+{
   char _cwd[PATH_BUFFER_SIZE];
   getcwd(_cwd, PATH_BUFFER_SIZE);
   Document schemaDoc;
@@ -461,19 +525,22 @@ template <typename socket_t> bool server<socket_t>::load_config() {
   std::string schemaJson((std::istreambuf_iterator<char>(ischema)),
                          (std::istreambuf_iterator<char>()));
 
-  if (schemaDoc.Parse(schemaJson.c_str()).HasParseError()) {
+  if (schemaDoc.Parse(schemaJson.c_str()).HasParseError())
+  {
     cout << "Schema Parse error..." << endl;
     return false;
   }
   SchemaDocument schema(schemaDoc);
 
-  if (configDoc.Parse(configJson.c_str()).HasParseError()) {
+  if (configDoc.Parse(configJson.c_str()).HasParseError())
+  {
     cout << "Config Parse error..." << endl;
     return false;
   }
 
   SchemaValidator validator(schema);
-  if (!configDoc.Accept(validator)) {
+  if (!configDoc.Accept(validator))
+  {
     StringBuffer sb;
     validator.GetInvalidSchemaPointer().StringifyUriFragment(sb);
     cerr << "build config validation failed for section" << sb.GetString()
@@ -499,7 +566,8 @@ template <typename socket_t> bool server<socket_t>::load_config() {
       configDoc["app"]["locations"]["docLocation"].GetString();
   cfg->locations.logLocation =
       configDoc["app"]["locations"]["logLocation"].GetString();
-  if (configDoc["app"]["locations"].HasMember("uploadLocation")) {
+  if (configDoc["app"]["locations"].HasMember("uploadLocation"))
+  {
     cfg->locations.uploadLocation =
         configDoc["app"]["locations"]["uploadLocation"].GetString();
   }
@@ -508,7 +576,6 @@ template <typename socket_t> bool server<socket_t>::load_config() {
   cfg->net.nodelay = configDoc["net"]["nodelay"].GetBool();
   cfg->net.nagle = configDoc["net"]["nagle"].GetBool();
 
-  cfg->net.tls.use = configDoc["net"]["tls"]["use"].GetBool();
   cfg->net.tls.version = configDoc["net"]["tls"]["version"].GetString();
   cfg->net.tls.cert = configDoc["net"]["tls"]["cert"].GetString();
   cfg->net.tls.key = configDoc["net"]["tls"]["key"].GetString();
@@ -524,45 +591,54 @@ template <typename socket_t> bool server<socket_t>::load_config() {
   return true;
 }
 
-template <typename socket_t> bool server<socket_t>::load_cache() {
+template <typename socket_t>
+bool server<socket_t>::load_cache()
+{
   return true;
 }
-template <typename socket_t> inline auto server<socket_t>::create(){
+template <typename socket_t>
+inline auto server<socket_t>::create()
+{
   load_config();
   load_cache();
   _socket_t->create();
   _socket_t->bind(cfg->net.ip, cfg->net.port);
+  _socket_t->set_tcp_no_delay(true);
+  _socket_t->set_tcp_keep_alive(true);
+  //_socket_t->set_non_blocking(true);
   _socket_t->listen();
 }
-template <typename socket_t> 
-inline auto server<socket_t>::start() {
+template <typename socket_t>
+inline auto server<socket_t>::start()
+{
   promise_t<SOCKET> awaiter;
   auto state = awaiter._state->lock();
   auto ret = _socket_t->accept();
-  if (ret == INVALID_SOCKET) ERR("accept() failed with error", ret);
+  if (ret == INVALID_SOCKET)
+    ERR("accept() failed with error", ret);
+
   awaiter._state->set_value(ret);
   state->unlock();
-  return awaiter.get_future(); 
+  return awaiter.get_future();
 }
 
-task start() {
+task start()
+{
   server<tcp_socket_t> tcp;
   tcp.create();
-  while(true){
+  while (true)
+  {
     auto c = co_await tcp.start();
-    if(c){
-      break;
-    }
   }
-  
 }
 
-void run(){
+void run()
+{
   start();
 }
-}
+} //schmal
 
-int main() 
+int main()
 {
   schmal::run();
   return 0;

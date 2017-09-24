@@ -81,10 +81,6 @@
               "description": "tls version to use",
               "type":"string"
             },
-            "use": {
-              "description": "set to true if ssl is needed",
-              "type": "boolean"
-            },
             "cert": {
               "description": "configure certificate file name",
               "type": "string"
@@ -94,7 +90,7 @@
               "type": "string"
             }
           },
-          "required": [ "cert", "key", "use" ],
+          "required": [ "cert", "key"],
           "additionalProperties": false
         }
       },
