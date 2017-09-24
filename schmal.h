@@ -59,7 +59,7 @@ namespace schmal {
   struct socket_t {
     virtual ~socket_t() {}
     virtual int create();
-    virtual int bind(const char*, short);
+    virtual int bind(string&, short);
     virtual int listen();
     virtual int set_non_blocking(bool);
     virtual int set_tcp_no_delay(bool);
@@ -86,16 +86,19 @@ namespace schmal {
     server(Args&&... args) : _socket_t(make_shared<socket_t>(std::forward<Args>(args)...)) {}
     server(const server&) = delete;
     server(server&&) = delete;
-    future_t<int> start();
+    auto create();
+    auto start();
   private:
     bool load_config();
     bool load_cache();
     shared_ptr<socket_t> _socket_t;
     vector<request_handler> handlers;
     config_t* cfg;
+     
   };
 
-  future_t<int> start();
+  task start();
+  void run();
 }
 
 #endif //SCHMAL_H

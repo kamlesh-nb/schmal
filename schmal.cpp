@@ -361,9 +361,9 @@ int socket_t::create() {
     ERR("socket() failed with error", sock);
   return 1;
 }
-int socket_t::bind(const char *address, short port) {
+int socket_t::bind(string& address, short port) {
   service.sin_family = AF_INET;
-  service.sin_addr.s_addr = inet_addr(address);
+  service.sin_addr.s_addr = inet_addr(address.c_str());
   service.sin_port = htons(port);
   ret = ::bind(sock, (SOCKADDR *)&service, sizeof(service));
   if (ret == SOCKET_ERROR)
@@ -411,7 +411,6 @@ int socket_t::set_tcp_keep_alive(bool set) {
 }
 
 struct tcp_socket_t : public socket_t {
-
   SOCKET accept() {
     SOCKET asock = ::accept(sock, NULL, NULL);
     if (asock == INVALID_SOCKET)
@@ -419,7 +418,6 @@ struct tcp_socket_t : public socket_t {
     return asock;
   }
   int connect() {}
-
 private:
 };
 struct tls_stream_t : public stream_t {
@@ -529,14 +527,43 @@ template <typename socket_t> bool server<socket_t>::load_config() {
 template <typename socket_t> bool server<socket_t>::load_cache() {
   return true;
 }
-
-template <typename socket_t> inline future_t<int> server<socket_t>::start() {
+template <typename socket_t> inline auto server<socket_t>::create(){
   load_config();
   load_cache();
+  _socket_t->create();
+  _socket_t->bind(cfg->net.ip, cfg->net.port);
+  _socket_t->listen();
+}
+template <typename socket_t> 
+inline auto server<socket_t>::start() {
+  promise_t<SOCKET> awaiter;
+  auto state = awaiter._state->lock();
+  auto ret = _socket_t->accept();
+  if (ret == INVALID_SOCKET) ERR("accept() failed with error", ret);
+  awaiter._state->set_value(ret);
+  state->unlock();
+  return awaiter.get_future(); 
 }
 
-future_t<int> start() {
+task start() {
   server<tcp_socket_t> tcp;
-  co_await tcp.start();
+  tcp.create();
+  while(true){
+    auto c = co_await tcp.start();
+    if(c){
+      break;
+    }
+  }
+  
 }
+
+void run(){
+  start();
+}
+}
+
+int main() 
+{
+  schmal::run();
+  return 0;
 }
