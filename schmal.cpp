@@ -4,6 +4,7 @@
 #include <experimental\filesystem>
 #include <fstream>
 #include <iostream>
+#include <regex>
 
 #include <rapidjson/document.h>
 #include <rapidjson/schema.h>
@@ -20,6 +21,12 @@
 #define unlikely(x) __builtin_expect(!!(x), 0)
 #define ALIGNED(n) __attribute__((aligned(n)))
 #endif
+
+#ifdef _WIN32
+#include <direct.h>
+#define getcwd _getcwd
+#endif
+
 
 #define PATH_BUFFER_SIZE 2048 // current working directory
 
@@ -52,29 +59,20 @@ const char ALIGNED(16) header_name[] = "\x00 "    /* control chars and up to SP 
                                        ":@"       /* 0x3a-0x40 */
                                        "[]"       /* 0x5b-0x5d */
                                        "{\377";   /* 0x7b-0xff */
-const char ALIGNED(16)
-    header_value[] = "\0\010"   /* allow HT */
+const char ALIGNED(16) header_value[] = "\0\010"   /* allow HT */
                      "\012\037" /* allow SP and up to but not including DEL */
                      "\177\177";
-
+                     
 using namespace std;
 using namespace rapidjson;
 namespace fs = std::experimental::filesystem;
 
 namespace schmal
 {
+  using Http = asio::ip::tcp::socket;
+  using Https = asio::ssl::stream<asio::ip::tcp::socket>;
 
-void ERR(const char *msg, int err)
-{
-#ifdef _WIN32
-  std::cerr << msg << ": " << WSAGetLastError() << std::endl;
-  WSACleanup();
-  assert(err);
-#else
-  std::cerr << msg << ": " << errno() << std::endl;
-  assert(err);
-#endif
-}
+
 struct config_t
 {
   struct _net
@@ -136,78 +134,18 @@ struct file_cache
   void load() {}
   void unload() {}
   void get(file_t &file) {}
-
 private:
   string path;
   map<string, file_t> files;
 };
-struct io_buff_t
-{
-  io_buff_t(int capacity)
-  {
-    _base = (char *)malloc(sizeof(char) * capacity);
-    _len = capacity;
-    _curpos = 0;
-    _slab = capacity;
-    memset(_base, '\0', _slab);
-  }
-  void reset()
-  {
-    if (_base)
-      return;
-    _base = (char *)malloc(sizeof(char) * _slab);
-    _len = _slab;
-    _curpos = 0;
-    memset(_base, '\0', _slab);
-  }
-  void save(char *str, int bytes)
-  {
-    if (_curpos > 0 && _curpos < _slab)
-    {
-      if (_curpos + bytes > _slab)
-      {
-        _base = (char *)realloc(_base, bytes - _slab);
-        memcpy(_base + _curpos, str, bytes);
-      }
-      else
-      {
-        memcpy(_base + _curpos, str, bytes);
-      }
-    }
-    else if (_curpos == 0)
-    {
-      memcpy(_base + _curpos, str, bytes);
-    }
-    else if (_curpos >= _slab)
-    {
-      _base = (char *)realloc(_base, _curpos + bytes);
-      memset(_base + _curpos, '\0', bytes);
-      memcpy(_base + _curpos - 1, str, bytes);
-    }
-    _curpos += bytes;
-    _len = _curpos;
-  }
-  char *get() { return _base; }
-  int length() { return _len; }
-  void clear()
-  {
-    _curpos = 0;
-    _len = 0;
-    free(_base);
-  }
-
-private:
-  char *_base;
-  int _curpos, _slab, _len = 0;
-};
 struct parser
 {
-  void parse(io_buff_t &buf, request &req)
+  void parse(char* buf, size_t length, request &req)
   {
     size_t pret;
 
-    buff = buf.get();
-    int len = buf.length();
+    buff = buf;
+    size_t len = length;
 
     // request line
     {
@@ -268,11 +206,8 @@ struct parser
       req.body.append(buff);
     }
     // request body
-
-    // buffer.Remove(buffer.Length()-1);
-    buf.clear();
   }
-  void parse(io_buff_t &buf, response &res) {}
+  void parse(char* buf, size_t length, response &res) {}
 
 private:
   char *buff;
@@ -356,156 +291,123 @@ private:
     }
   }
 };
-struct tcp_stream_t : public stream_t
-{
-  tcp_stream_t(SOCKET sock) : sock(sock) {}
-  void read(io_buff_t &buff) override
-  {
-    int bytes;
-    do
-    {
-      char *data = (char *)malloc(sizeof(char) * 512);
-      bytes = ::recv(sock, data, 512, 0);
-      if (bytes == SOCKET_ERROR)
-        ERR("recv() failed with error", bytes);
-      buff.save(data, bytes);
-      free(data);
-      if (bytes < 512)
-        break;
-    } while (bytes > 0);
-  }
-  int write(char *data, size_t len) override
-  {
-    ret = ::send(sock, data, len, 0);
-    if (ret == INVALID_SOCKET)
-      ERR("send() failed with error", ret);
-    return ret;
-  }
-  int close() override
-  {
-    ret = ::closesocket(sock);
-    if (ret == INVALID_SOCKET)
-      ERR("close failed with error", ret);
-    return ret;
-  }
-
-private:
-  SOCKET sock;
-  int ret;
-};
-
-int socket_t::create()
-{
-#ifdef _WIN32
-  WSADATA wsaData;
-  ret = WSAStartup(MAKEWORD(2, 2), &wsaData);
-  if (ret != NO_ERROR)
-    ERR("WSAStartup failed with error", ret);
-#endif
-  // create socket, bind and start listening
-  sock = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-  if (sock == INVALID_SOCKET)
-    ERR("socket() failed with error", sock);
-  return 1;
-}
-int socket_t::bind(string &address, short port)
-{
-  service.sin_family = AF_INET;
-  service.sin_addr.s_addr = inet_addr(address.c_str());
-  service.sin_port = htons(port);
-  ret = ::bind(sock, (SOCKADDR *)&service, sizeof(service));
-  if (ret == SOCKET_ERROR)
-    ERR("bind() failed with error", sock);
-  return ret;
-}
-int socket_t::listen()
-{
-  ret = ::listen(sock, SOMAXCONN);
-  if (ret == SOCKET_ERROR)
-    ERR("listen() failed with error", ret);
-  return ret;
-}
-int socket_t::set_non_blocking(bool _mode)
-{
-  u_long mode;
-  if (_mode)
-  {
-    mode = 1;
-  }
-  else
-  {
-    mode = 0;
-  }
-  int ret = ioctlsocket(sock, FIONBIO, &mode);
-  if (ret != NO_ERROR)
-    ERR("ioctlsocket() failed with error", ret);
-
-  return ret;
-}
-int socket_t::set_tcp_no_delay(bool set)
-{
-  BOOL bOptVal = set;
-  int bOptLen = sizeof(BOOL);
-  int iOptVal = 0;
-  ret = setsockopt(sock, SOL_SOCKET, TCP_NODELAY, (char *)&bOptVal, bOptLen);
-  if (ret == SOCKET_ERROR)
-    ERR("setsockopt() failed with error", ret);
-
-  return ret;
-}
-int socket_t::set_tcp_keep_alive(bool set)
-{
-  BOOL bOptVal = set;
-  int bOptLen = sizeof(BOOL);
-  int iOptVal = 0;
-  ret = setsockopt(sock, SOL_SOCKET, SO_KEEPALIVE, (char *)&bOptVal, bOptLen);
-  if (ret == SOCKET_ERROR)
-    ERR("setsockopt() failed with error", ret);
-
-  return ret;
-}
-
-struct tcp_socket_t : public socket_t
-{
-  SOCKET accept()
-  {
-    SOCKET asock = ::accept(sock, NULL, NULL);
-    if (asock == INVALID_SOCKET)
-      ERR("accept() failed with error", asock);
-    return asock;
-  }
-  int connect() {}
-
-private:
-};
-struct tls_stream_t : public stream_t
-{
-  void read(io_buff_t &buff) override {}
-  int write(char *data, size_t len) override { return 0; }
-  int close() override { return 0; }
-};
-struct tls_socket_t : public socket_t
-{
-  int accept() {}
-  int connect() {}
-
-private:
-};
 
 struct request_handler
 {
   request_handler() {}
-  void post(stream_t *stream) { _stream = stream; }
+ // void post(stream_t *stream) { _stream = stream; }
 
 private:
-  stream_t *_stream;
-  atomic<bool> done;
+   
 };
 
 void response::add_header(string &key, string &value)
 {
   headers.emplace(key, value);
 }
+
+
+template<class socket_type>
+struct session_t : public std::enable_shared_from_this<session_t<socket_type>> {
+  template<class ...Args>
+  session_t(Args&&... args) : socket(new socket_type(std::forward<Args>(args)...)) {}
+  auto read() {
+    auto self(shared_from_this());
+    promise_t<char*> awaiter;
+    auto state = awaiter._state->lock();
+    asio::async_read_until(socket, m_streambuf, "\0", [this, self]
+    (std::error_code ec, size_t length) {
+      if (ec) {
+        self->on_error(ec);
+      }
+    });
+    char* output = (char*)malloc(m_streambuf.size());
+    memcpy(output, asio::buffer_cast<const void*>(m_streambuf.data()), m_streambuf.size());
+    awaiter._state->set_value(output);
+    state->unlock();
+    return awaiter.get_future();
+  }
+  auto& write(awaitable_state<size_t>& awaitable, char* data, size_t length) {
+    auto self(shared_from_this());
+    asio::async_write(socket, asio::buffer(data, length),
+      [this, self](std::error_code ec, std::size_t length)
+    {
+      if (!ec)
+      {
+        self->on_success(length);
+        std::error_code ignored_ec;
+        m_socket.shutdown(asio::ip::tcp::socket::shutdown_both, ignored_ec);
+      }
+      else {
+        self->on_error(ec);
+      }
+    });
+    awaitable.set_value(length);
+    return awaitable;
+  }
+  void on_error(std::error_code ec) {
+    err_cd = ec;
+  }
+  void on_success(size_t len) {
+    length = len;
+  }
+  unique_ptr<socket_type> socket;
+private:
+  std::error_code err_cd;
+  size_t length;
+  asio::streambuf m_streambuf;
+};
+
+
+struct acceptor_t{
+  acceptor_t(asio::io_context& io_context, 
+    string& address, 
+    string& port) :
+    m_io_context(io_context),
+    m_acceptor(io_context),
+    m_signals(io_context)
+  {
+    m_signals.add(SIGINT);
+    m_signals.add(SIGTERM);
+#if defined(SIGQUIT)
+  m_signals.add(SIGQUIT);
+#endif // defined(SIGQUIT)
+    m_signals.async_wait(std::bind(&acceptor_t::stop, this));
+  
+    asio::ip::tcp::resolver resolver(io_context);
+    asio::ip::tcp::endpoint endpoint =
+      *resolver.resolve(address, port).begin();
+      m_acceptor.open(endpoint.protocol());
+      m_acceptor.set_option(asio::ip::tcp::acceptor::reuse_address(true));
+      m_acceptor.bind(endpoint);
+      m_acceptor.listen();
+  }
+  void run(){
+    m_io_context.run();
+  }
+  void stop(){m_acceptor.close();}
+private:
+  future_t<session_t<Http>> accept(){
+    promise_t<session_t<Http>> awaitable;
+    
+  }
+  
+  asio::io_context& m_io_context;
+  asio::ip::tcp::acceptor m_acceptor;
+  asio::signal_set m_signals;
+};
+
+struct tls_acceptor_t{
+  tls_acceptor_t(asio::io_context& io_context):
+  m_io_context(io_context),
+  m_acceptor(io_context),
+  m_ssl_context(asio::ssl::context::tlsv12)
+  {}
+private:
+  asio::io_context& m_io_context;
+  asio::ip::tcp::acceptor m_acceptor;
+  asio::ssl::context m_ssl_context;
+};
 
 template <typename socket_t>
 bool server<socket_t>::load_config()
@@ -543,12 +445,12 @@ bool server<socket_t>::load_config()
   {
     StringBuffer sb;
     validator.GetInvalidSchemaPointer().StringifyUriFragment(sb);
-    cerr << "build config validation failed for section" << sb.GetString()
+    cerr << "app config validation failed for section" << sb.GetString()
          << endl;
     sb.Clear();
     validator.GetInvalidDocumentPointer().StringifyUriFragment(sb);
     cerr << "invalid property found in configuration" << sb.GetString() << endl;
-    cerr << "terminating build....";
+    cerr << "terminating....";
     return false;
   }
 
@@ -601,45 +503,40 @@ inline auto server<socket_t>::create()
 {
   load_config();
   load_cache();
-  _socket_t->create();
-  _socket_t->bind(cfg->net.ip, cfg->net.port);
-  _socket_t->set_tcp_no_delay(true);
-  _socket_t->set_tcp_keep_alive(true);
-  //_socket_t->set_non_blocking(true);
-  _socket_t->listen();
-}
-template <typename socket_t>
-inline auto server<socket_t>::start()
-{
-  promise_t<SOCKET> awaiter;
-  auto state = awaiter._state->lock();
-  auto ret = _socket_t->accept();
-  if (ret == INVALID_SOCKET)
-    ERR("accept() failed with error", ret);
-
-  awaiter._state->set_value(ret);
-  state->unlock();
-  return awaiter.get_future();
+   
 }
 
-task start()
-{
-  server<tcp_socket_t> tcp;
-  tcp.create();
-  while (true)
-  {
-    auto c = co_await tcp.start();
-  }
-}
 
-void run()
-{
-  start();
-}
+// task start()
+// {
+//  /* server<tcp_socket_t> tcp;
+//   tcp.create();
+//   while (true)
+//   {
+//     auto c = co_await tcp.start();
+//   }*/
+// }
+
+// void run()
+// {
+//   start();
+// }
+
+
+
+
+
 } //schmal
 
 int main()
 {
-  schmal::run();
+  //schmal::run();
+
+  asio::io_context ioc;
+  schmal::session_t<schmal::Http> sess(ioc);
+  schmal::server<schmal::Http> s;
+  s.create();
+  cout << "this is executed" << endl;
+
   return 0;
 }
