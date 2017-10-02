@@ -531,7 +531,7 @@ namespace schmal
       for (; ; )
       {
         auto sock = co_await schmal::accept(acceptor);
-        Session(std::move(sock));
+        read(std::move(sock));
       }
     }
   }
@@ -543,7 +543,7 @@ int main()
   asio::io_context io;
   schmal::web_context_t* wct = new schmal::web_context_t;
   wct->create();
-  schmal::http::Server(io, wct);
+  schmal::http::accept(io, wct);
   io.run();
 
   return EXIT_SUCCESS;
