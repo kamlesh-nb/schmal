@@ -3,22 +3,9 @@
 
 #include <map>
 #include <vector>
-#include <cstdlib>
-#include <iostream>
-#include <sstream>
-#include <memory>
-#include <utility>
-#include <asio.hpp>
-#include <asio/ssl.hpp>
-#include <asio/ts/buffer.hpp>
-#include <asio/ts/internet.hpp>
-
-using asio::ip::tcp;
-
-#include "awaitio.h"
+#include <string>
 
 using namespace std;
-using namespace awaitio;
 
 namespace schmal {
   struct config_t;
@@ -40,26 +27,28 @@ namespace schmal {
   };
   struct parser;
   struct file_cache;
-  struct acceptor_t;
-  struct request_handler;
-
-  template <typename socket_t>
-  struct server
+  namespace awaitable {
+    struct acceptor_t;
+    struct reader_t;
+    struct writer_t;
+    struct parser_t;
+    struct process_t;
+  }
+  struct web_context_t
   {
-  public:
-    server(){}
-    server(const server&) = delete;
-    server(server&&) = delete;
-    auto create();
-    auto start();
-  private:
+    web_context_t() {}
+    void create();
     bool load_config();
     bool load_cache();
     config_t* cfg;
+    file_cache* fc;
   };
+  namespace http {
 
-  task start();
-  void run();
+  }
+  namespace https {
+
+  }
 }
 
 #endif //SCHMAL_H
