@@ -63,7 +63,7 @@
         },
         "port": {
           "description": "port number",
-          "type": "integer"
+          "type": "string"
         },
         "nodelay": {
           "description": "set true to configure no delay",
@@ -126,7 +126,7 @@
         },
         "port":{
           "description": "port to connect the store",
-          "type":"integer"
+          "type":"string"
         },
         "userid": {
           "description": "user if to connect",
