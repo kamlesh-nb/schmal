@@ -508,28 +508,20 @@ namespace schmal
     return awaitable::acceptor_t{ a };
   }
   namespace http {
-    task Session(asio::ip::tcp::socket sock)
+    task read(asio::ip::tcp::socket sock)
     {
       try
       {
-        char buf[1024];
-        std::cout << "connected: " << sock.remote_endpoint() << std::endl;
-        for (; ; )
-        {
+        for (; ; ){
 
-          /* auto len = await act::read_some(sock, asio::buffer(buf), ec);
-          if (ec == asio::error::eof)
-          c
-          co_await act::write(sock, asio::buffer(buf, len));*/
-          co_return;
         }
       }
       catch (std::exception& e)
       {
-        std::cout << "error: " << sock.remote_endpoint() << ": " << e.what() << std::endl;
+        std::cout << "error: " << e.what() << std::endl;
       }
     }
-    task Server(asio::io_context& io, web_context_t* wct)
+    task accept(asio::io_context& io, web_context_t* wct)
     {
       asio::ip::tcp::resolver resolver{ io };
       asio::ip::tcp::endpoint endpoint = *resolver.resolve(wct->cfg->net.ip, wct->cfg->net.port).begin();
