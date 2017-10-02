@@ -192,11 +192,11 @@ namespace schmal
   {
     char *_headers;
     char *_def_headers;
-    char *name;
-    char *etag;
-    char *last_write_time;
-    char *data;
-    char *def_data;
+    string *name;
+    string *etag;
+    string *last_write_time;
+    const char *data;
+    const char *def_data;
     size_t length;
     size_t def_length;
   };
