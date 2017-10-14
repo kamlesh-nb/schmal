@@ -75,6 +75,8 @@ namespace schmal {
     string body;
     map<string, string> headers;
     map<string, string> cookies;
+    string get_header(string&);
+    string get_cookie(string&);
     bool api;
   };
   struct response
@@ -85,7 +87,7 @@ namespace schmal {
     string body;
     io_buff_t buffer;
     void add_header(string&, string&);
-    void add_cookies(string&, string&);
+    void add_cookie(string&, string&);
     void create();
   };
   struct parser;
