@@ -1,3 +1,5 @@
+#define ASIO_STANDALONE
+
 #include "schmal.h"
 #include <experimental\filesystem>
 #include <experimental\coroutine>
@@ -86,7 +88,6 @@ namespace schmal
       bool final_suspend() { return false; }
     };
   };
-
   struct session_cache {
 
   };
@@ -155,27 +156,43 @@ namespace schmal
     string path;
     map<string, file_t> files;
   };
+  struct http_msg_t {
+    string first_line;
+    string headers;
+    string body;
+  };
+  struct http_context_t {
+    http_context_t(tcp::socket sock,
+      config_t* cfg) : _socket(std::move(sock)),
+      _config(cfg) {}
+    request _request;
+    response _response;
+    tcp::socket _socket;
+    http_msg_t message;
+    asio::streambuf _streambuf;
+    config_t* _config;
+  };
   struct parser
   {
-    void parse(char* buf, size_t length, request &req)
+    void parse(http_context_t& context)
     {
       size_t pret;
 
-      buff = buf;
-      size_t len = length;
+      buff = (char*)context.message.first_line.c_str();
+      len = context.message.first_line.size();
 
       // request line
       {
         pret = find_chars(buff, first_line, len);
-        req.method.append(buff, pret);
+        context._request.method.append(buff, pret);
 
         move_buff(++pret);
         pret = find_chars(buff, first_line, len);
-        req.url.append(buff, pret + 1);
+        context._request.url.append(buff, pret + 1);
 
         move_buff(++pret);
         pret = find_chars(buff, first_line, len);
-        req.scheme.append(buff, pret);
+        context._request.scheme.append(buff, pret);
 
         move_buff(pret);
         pret = find_chars(buff, first_line, len);
@@ -185,6 +202,9 @@ namespace schmal
       string name, value;
       int num_zeroes = 0;
       // request headers
+      buff = (char*)context.message.headers.c_str();
+      len = context.message.headers.size();
+
       while (!pret)
       {
         pret = find_chars(buff, header_name, len);
@@ -198,7 +218,7 @@ namespace schmal
             move_buff(1);
             value.append(buff, --pret);
             move_buff(--pret);
-            req.headers.emplace(name, value);
+            context._request.headers.emplace(name, value);
             name.clear();
             value.clear();
           }
@@ -219,14 +239,16 @@ namespace schmal
 
       // request body
       {
-        // buffer.Skip(num_zeroes);
-        req.body.append(buff);
+        buff = (char*)context.message.body.c_str();
+        len = context.message.body.size();
+        context._request.body.append(buff);
       }
       // request body
     }
     void parse(char* buf, size_t length, response &res) {}
   private:
     char *buff;
+    size_t len;
     size_t findchar_fast(const char *str, size_t len, const char *ranges, int ranges_sz, int *found)
     {
       __m128i ranges16 = _mm_loadu_si128((const __m128i *)ranges);
@@ -273,7 +295,6 @@ namespace schmal
       }
     }
   };
-
   string request::get_header(string& key) {
     return headers[key];
   }
@@ -289,24 +310,6 @@ namespace schmal
   void response::create() {
 
   }
-
-  struct http_msg_t {
-    string first_line;
-    string headers;
-    string body;
-  };
-  struct http_context_t {
-    http_context_t(tcp::socket sock,
-      config_t* cfg) : _socket(std::move(sock)),
-      _config(cfg) {}
-    request _request;
-    response _response;
-    tcp::socket _socket;
-    http_msg_t message;
-    asio::streambuf _streambuf;
-    config_t* _config;
-  };
-
   namespace awaitable {
     struct acceptor_t {
       bool _ready = false;
@@ -370,7 +373,8 @@ namespace schmal
             _ready = true;
             coro.resume();
           });
-        } else {
+        }
+        else {
           asio::async_read_until(m_http_context_t->_socket,
             m_http_context_t->_streambuf,
             m_delim, [this, coro]
@@ -391,15 +395,15 @@ namespace schmal
     struct parser_t {
       bool _ready = false;
       parser_t(shared_ptr<http_context_t> p_http_context_t) :
-        m_http_context_t(std::move(p_http_context_t)){}
+        m_http_context_t(std::move(p_http_context_t)) {}
       bool await_ready() noexcept {
         return _ready;
       }
       void await_suspend(coroutine_handle<> coro) noexcept {
-       
-          _ready = true;
-          coro.resume();
-        
+        _parser.parse(*m_http_context_t);
+        _ready = true;
+        coro.resume();
+
       }
       auto await_resume() {
         if (e)
@@ -408,6 +412,7 @@ namespace schmal
       }
       shared_ptr<http_context_t> m_http_context_t;
       std::error_code e;
+      parser _parser;
     };
     struct process_t {
       bool _ready = false;
@@ -459,7 +464,6 @@ namespace schmal
       char* buff;
     };
   } //awaitable
-
   bool web_context_t::load_config()
   {
     char _cwd[PATH_BUFFER_SIZE];
@@ -557,16 +561,54 @@ namespace schmal
   auto read(shared_ptr<http_context_t> p_http_context_t, string delim) {
     return awaitable::reader_t{ p_http_context_t, delim };
   }
+  auto parse(shared_ptr<http_context_t> p_http_context_t) {
+    return awaitable::parser_t{ p_http_context_t };
+  }
+  auto process(shared_ptr<http_context_t> p_http_context_t) {
+    return awaitable::parser_t{ p_http_context_t };
+  }
   auto write(shared_ptr<http_context_t> p_http_context_t) {
     return awaitable::writer_t{ p_http_context_t };
   }
-
   namespace http {
+    task respond(shared_ptr<http_context_t> p_http_context_t) {
+      try
+      {
+        auto ret = co_await schmal::write(p_http_context_t);
+      }
+      catch (std::exception& e)
+      {
+        std::cout << "error: " << e.what() << std::endl;
+      }
+    }
+    task process_request(shared_ptr<http_context_t> p_http_context_t) {
+      try
+      {
+        auto ret = co_await schmal::process(p_http_context_t);
+        schmal::http::respond(p_http_context_t);
+      }
+      catch (std::exception& e)
+      {
+        std::cout << "error: " << e.what() << std::endl;
+      }
+    }
+    task parse_request(shared_ptr<http_context_t> p_http_context_t) {
+      try
+      {
+        auto ret = co_await schmal::parse(p_http_context_t);
+        schmal::http::process_request(p_http_context_t);
+      }
+      catch (std::exception& e)
+      {
+        std::cout << "error: " << e.what() << std::endl;
+      }
+    }
     task read_body(shared_ptr<http_context_t> p_http_context_t)
     {
       try
       {
         auto ret = co_await schmal::read(p_http_context_t, string("body"));
+        schmal::http::parse_request(p_http_context_t);
       }
       catch (std::exception& e)
       {
@@ -604,11 +646,11 @@ namespace schmal
       asio::ip::tcp::acceptor acceptor{ io, endpoint };
       acceptor.set_option(asio::ip::tcp::acceptor::reuse_address(true));
       asio::ip::tcp::socket sock{ io };
-      for (; ; )
+      for (; ;)
       {
         auto sock = co_await schmal::accept(acceptor);
         auto _context = make_shared<http_context_t>(std::move(sock), wct->cfg);
-        schmal::http::read_first_line (_context);
+        schmal::http::read_first_line(_context);
       }
     }
   }
@@ -623,4 +665,4 @@ int main()
   io.run();
 
   return EXIT_SUCCESS;
-}  
+}
