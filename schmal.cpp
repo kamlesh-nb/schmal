@@ -10,10 +10,8 @@
 #include <rapidjson/schema.h>
 #include <rapidjson/stringbuffer.h>
 
-#include <asio.hpp>
-#include <asio/ssl.hpp>
-#include <asio/ts/buffer.hpp>
-#include <asio/ts/internet.hpp>
+#include <zlib.h>
+#include <openssl/md5.h>
 
 
 
@@ -72,9 +70,7 @@ const char ALIGNED(16) header_value[] = "\0\010"   /* allow HT */
 
 using namespace std;
 using namespace rapidjson;
-using asio::ip::tcp;
 using namespace std::experimental;
-
 namespace fs = std::experimental::filesystem;
 
 namespace schmal
@@ -88,6 +84,345 @@ namespace schmal
       bool final_suspend() { return false; }
     };
   };
+  namespace util {
+
+    enum class HttpHeader {
+      Content_Type = 1,
+      Content_Length,
+      Last_Modified,
+      ETag,
+      Content_Encoding,
+      Set_Cookie,
+      Authorization,
+      Access_Control_Allow_Origin,
+      Access_Control_Allow_Methods,
+      Access_Control_Allow_Headers,
+      Access_Control_Max_Age,
+      Access_Control_Allow_Credentials,
+      Access_Control_Expose_Headers,
+      Vary,
+      Keep_Alive,
+      Connection
+    };
+    enum class HttpStatus {
+      Continue = 100,
+      SwitchingProtocols = 101,
+      Checkpoint = 103,
+      OK = 200,
+      Created = 201,
+      Accepted = 202,
+      NonAuthoritativeInformation = 203,
+      NoContent = 204,
+      ResetContent = 205,
+      PartialContent = 206,
+      MultipleChoices = 300,
+      MovedPermanently = 301,
+      Found = 302,
+      SeeOther = 303,
+      NotModified = 304,
+      SwitchProxy = 306,
+      TemporaryRedirect = 307,
+      ResumeIncomplete = 308,
+      BadRequest = 400,
+      Unauthorized = 401,
+      PaymentRequired = 402,
+      Forbidden = 403,
+      NotFound = 404,
+      MethodNotAllowed = 405,
+      NotAcceptable = 406,
+      ProxyAuthenticationRequired = 407,
+      RequestTimeout = 408,
+      Conflict = 409,
+      Gone = 410,
+      LengthRequired = 411,
+      PreconditionFailed = 412,
+      RequestEntityTooLarge = 413,
+      RequestURITooLong = 414,
+      UnsupportedMediaType = 415,
+      RequestedRangeNotSatisfiable = 416,
+      ExpectationFailed = 417,
+      InternalTcpServerError = 500,
+      NotImplemented = 501,
+      BadGateway = 502,
+      ServiceUnavailable = 503,
+      GatewayTimeout = 504,
+      HTTPVersionNotSupported = 505,
+      NetworkAuthenticationRequired = 511
+
+    };
+    struct severity {
+      int severity_id;
+      const char *severity_type;
+    } severities[] =
+    {
+      { 1, "[LOW]" },
+      { 2, "[MEDIUM]" },
+      { 3, "[HIGH]" },
+      { 4, "[CRITICAL]" },
+      { 0, 0 }
+    };
+
+    struct header {
+      int header_id;
+      const char *header_field;
+    } headers[] =
+    {
+      { 1, "Content-Type: " },
+      { 2, "Content-Length: " },
+      { 3, "Last-Modified: " },
+      { 4, "ETag: " },
+      { 5, "Content-Encoding: deflate\r\n" },
+      { 6, "Set-Cookie: " },
+      { 7, "Authorization:" },
+      { 8, "Access-Control-Allow-Origin:" },
+      { 9, "Access-Control-Allow-Methods:" },
+      { 10, "Access-Control-Allow-Headers:" },
+      { 11, "Access-Control-Max-Age:" },
+      { 12, "Access-Control-Allow-Credentials:" },
+      { 13, "Access-Control-Expose-Headers:" },
+      { 14, "Vary" },
+      { 15, "Keep-Alive" },
+      { 16, "Connection" },
+      { 0, 0 }
+    };
+
+    struct statusphrase {
+      int status_code;
+      const char *status_phrase;
+    } statusphrases[] =
+    {
+      { 100, "HTTP/1.1 100 Continue" },
+      { 101, "HTTP/1.1 101 Switching Protocols" },
+      { 103, "HTTP/1.1 103 Checkpoint" },
+      { 200, "HTTP/1.1 200 OK" },
+      { 201, "HTTP/1.1 201 Created" },
+      { 202, "HTTP/1.1 202 Accepted" },
+      { 203, "HTTP/1.1 203 Non-Authoritative-Information" },
+      { 204, "HTTP/1.1 204 No Content" },
+      { 205, "HTTP/1.1 205 Reset Content" },
+      { 206, "HTTP/1.1 206 Partial Content" },
+      { 300, "HTTP/1.1 300 Multiple Choices" },
+      { 301, "HTTP/1.1 301 Moved Permanently" },
+      { 302, "HTTP/1.1 302 Found" },
+      { 303, "HTTP/1.1 303 See Other" },
+      { 304, "HTTP/1.1 304 Not Modified" },
+      { 306, "HTTP/1.1 306 Switch Proxy" },
+      { 307, "HTTP/1.1 307 Temporary Redirect" },
+      { 308, "HTTP/1.1 308 Resume Incomplete" },
+      { 400, "HTTP/1.1 400 Bad Request" },
+      { 401, "HTTP/1.1 401 Unauthorized" },
+      { 402, "HTTP/1.1 402 Payment Required" },
+      { 403, "HTTP/1.1 403 Forbidden" },
+      { 404, "HTTP/1.1 404 Not Found" },
+      { 405, "HTTP/1.1 405 Method Not Allowed" },
+      { 406, "HTTP/1.1 406 Not Acceptable" },
+      { 407, "HTTP/1.1 407 Proxy Authentication Required" },
+      { 408, "HTTP/1.1 408 Request Timeout" },
+      { 409, "HTTP/1.1 409 Conflict" },
+      { 410, "HTTP/1.1 410 Gone" },
+      { 411, "HTTP/1.1 411 Length Required" },
+      { 412, "HTTP/1.1 412 Precondition Failed" },
+      { 413, "HTTP/1.1 413 Request Entity Too Large" },
+      { 414, "HTTP/1.1 414 Request URI Too Large" },
+      { 415, "HTTP/1.1 415 Unsupported Media Type" },
+      { 416, "HTTP/1.1 416 Requested Range Not Satisfiable" },
+      { 417, "HTTP/1.1 417 Expectation Failled" },
+      { 500, "HTTP/1.1 500 Internal Server Error" },
+      { 501, "HTTP/1.1 501 Not Implemented" },
+      { 502, "HTTP/1.1 502 Bad Gateway" },
+      { 503, "HTTP/1.1 503 Service Unavailable" },
+      { 504, "HTTP/1.1 504 Gateway Timeout" },
+      { 505, "HTTP/1.1 505 HTTP Version Not Supported" },
+      { 511, "HTTP/1.1 511 Network Authentication Required" },
+      { 0,   0 }
+    };
+
+    struct statusmsg {
+      int status_code;
+      const char *status_msg;
+    } statusmsgs[] =
+    {
+      { 100, "Continue" },
+      { 101, "Switching Protocols" },
+      { 103, "Checkpoint" },
+      { 200, "OK" },
+      { 201, "Created" },
+      { 202, "Accepted" },
+      { 203, "Non-Authoritative-Information" },
+      { 204, "No Content" },
+      { 205, "Reset Content" },
+      { 206, "Partial Content" },
+      { 300, "Multiple Choices" },
+      { 301, "Moved Permanently" },
+      { 302, "Found" },
+      { 303, "See Other" },
+      { 304, "Not Modified" },
+      { 306, "Switch Proxy" },
+      { 307, "Temporary Redirect" },
+      { 308, "Resume Incomplete" },
+      { 400, "Bad Request" },
+      { 401, "Unauthorized" },
+      { 402, "Payment Required" },
+      { 403, "Forbidden" },
+      { 404, "Not Found" },
+      { 405, "Method Not Allowed" },
+      { 406, "Not Acceptable" },
+      { 407, "Proxy Authentication Required" },
+      { 408, "Request Timeout" },
+      { 409, "Conflict" },
+      { 410, "Gone" },
+      { 411, "Length Required" },
+      { 412, "Precondition Failed" },
+      { 413, "Request Entity Too Large" },
+      { 414, "Request URI Too Large" },
+      { 415, "Unsupported Media Type" },
+      { 416, "Requested Range Not Satisfiable" },
+      { 417, "Expectation Failled" },
+      { 500, "Internal Server Error" },
+      { 501, "Not Implemented" },
+      { 502, "Bad Gateway" },
+      { 503, "Service Unavailable" },
+      { 504, "Gateway Timeout" },
+      { 505, "HTTP Version Not Supported" },
+      { 511, "Network Authentication Required" },
+      { 0,   0 }
+    };
+
+    struct mapping {
+      const char *extension;
+      const char *mime_type;
+    } mappings[] =
+    {
+      { "html",  "text/html; charset=UTF-8" },
+      { "htm",   "text/html; charset=UTF-8" },
+      { "htmls", "text/html; charset=UTF-8" },
+      { "jpe",   "image/jpeg" },
+      { "jpeg",  "image/jpeg" },
+      { "jpg",   "image/jpeg" },
+      { "js",    "application/javascript; charset=UTF-8" },
+      { "jsonp", "application/javascript; charset=UTF-8" },
+      { "json",  "application/json; charset=UTF-8" },
+      { "map",   "application/json; charset=UTF-8" },
+      { "gif",   "image/gif" },
+      { "css",   "text/css; charset=UTF-8" },
+      { "gz",    "application/x-gzip" },
+      { "gzip",  "multipart/x-gzip" },
+      { "ico",   "image/x-icon" },
+      { "png",   "image/png" },
+      { 0,       0 }
+    };
+
+
+    const char* cached_date_response = "\r\nDate: ";
+    const char* err_cached_response = "\r\nConnection: keep-alive\r\nServer: pigeon\r\nAccept_Range: bytes\r\nContent-Type: text/html; charset=UTF-8\r\n";
+    const char* api_cached_response = "\r\nConnection: keep-alive\r\nServer: pigeon\r\nAccept_Range: bytes\r\nContent-Type: application/json\r\n";
+
+    const char *err_msg1 = "<!DOCTYPE html><html><head lang='en'><meta charset='UTF-8'><title>Status</title></head><body><p/><p/><p/><p/><p/><p/><p/><table align=\"center\" style=\"font-family: monospace;font-size: large;background-color: lemonchiffon;border-left-color: green;border-color: red;\"><tr style=\"background: burlywood;\"><th>Status Code</th><th>Message</th></tr><tr><td>";
+    const char *err_msg3 = "</td><td>";
+    const char *err_msg5 = "</td></tr><tr><td>Description: </td><td>";
+    const char *err_msg7 = "</td></tr></table></body></html>";
+
+    const char* api_err_msg1 = "{ \"Status\":";
+    const char* api_err_msg2 = ", \"StatusDescription:\"";
+    const char* api_err_msg3 = ", \"ErrorDescription\":";
+    const char* api_err_msg4 = "}";
+
+    char *now() {
+      time_t now = time(0);
+      char *dt;
+      tm *gmtm = gmtime(&now);
+      dt = asctime(gmtm);
+      dt[strlen(dt) - 1] = '\0';
+      return dt;
+    }
+    auto get_cached_response(bool is_api, io_buff_t buff){
+
+      buff.save((char *)cached_date_response, strlen((char *)cached_date_response));
+      char* ts = now();
+      buff.save(ts, strlen(ts));
+
+      if (is_api) {
+        buff.save((char *)api_cached_response, strlen((char *)api_cached_response));
+      }
+    }
+    auto get_header_field(HttpHeader hdr){
+
+      for (header *m = headers; m->header_id; ++m) {
+        if (m->header_id == static_cast<int>(hdr)) {
+          return m->header_field;
+        }
+      }
+
+      return  "unknown header";
+    }
+    auto get_header_field(HttpHeader hdr, string &data){
+      for (header *m = headers; m->header_id; ++m) {
+        if (m->header_id == static_cast<int>(hdr)) {
+          data += m->header_field;
+        }
+      }
+    }
+    auto get_status_phrase(HttpStatus status, io_buff_t& buff){
+
+      for (statusphrase *m = statusphrases; m->status_code; ++m) {
+        if (m->status_code == static_cast<int>(status)) {
+          buff.save((char *)m->status_phrase, strlen((char *)m->status_phrase));
+        }
+      }
+    }
+    auto get_status_message(HttpStatus status){
+
+      for (statusmsg *m = statusmsgs; m->status_code; ++m) {
+        if (m->status_code == static_cast<int>(status)) {
+          return m->status_msg;
+        }
+      }
+      return "Unknown";
+    }
+    auto get_mime_type(string &extension) {
+      for (mapping *m = mappings; m->extension; ++m) {
+        if (m->extension == extension) {
+          return m->mime_type;
+        }
+        return "text/plain";
+      }
+      return "Unknown";
+    }
+    auto deflate_string (string &in, string &out){
+    z_stream zs;                        
+    memset(&zs, 0, sizeof(zs));
+    int compressionlevel = Z_BEST_COMPRESSION;
+    if (deflateInit(&zs, compressionlevel) != Z_OK)
+      throw (std::runtime_error("deflateInit failed while compressing."));
+
+    zs.next_in = (Bytef *)in.data();
+    zs.avail_in = static_cast<unsigned int>(in.size()); 
+
+    int ret;
+    char outbuffer[32768];
+    std::string outstring;
+    do {
+      zs.next_out = reinterpret_cast<Bytef *>(outbuffer);
+      zs.avail_out = sizeof(outbuffer);
+
+      ret = deflate(&zs, Z_FINISH);
+
+      if (outstring.size() < zs.total_out) {
+        outstring.append(outbuffer, zs.total_out - outstring.size());
+      }
+    } while (ret == Z_OK);
+    deflateEnd(&zs);
+    if (ret != Z_STREAM_END) {          
+      std::ostringstream oss;
+      oss << "Exception during zlib compression: (" << ret << ") " << zs.msg;
+      throw (std::runtime_error(oss.str()));
+    }
+    zs.avail_out = zs.total_out;
+    out = outstring;
+    return outstring.size();
+  }
+  
+  }
   struct session_cache {
 
   };
@@ -130,17 +465,18 @@ namespace schmal
     string defaultPage;
     string apiRoute;
     int workers;
+    int64_t max_request_size;
     _locations locations;
     _net net;
     _store store;
   };
   struct file_t
   {
-    char *_headers;
-    char *_def_headers;
-    string *name;
-    string *etag;
-    string *last_write_time;
+    string _headers;
+    string _def_headers;
+    string name;
+    string etag;
+    string last_write_time;
     const char *data;
     const char *def_data;
     size_t length;
@@ -149,50 +485,130 @@ namespace schmal
   struct file_cache
   {
     file_cache(string &_path) : path(_path) {}
-    void load() {}
-    void unload() {}
-    void get(file_t &file) {}
+    void load() {
+      for (auto &p : fs::recursive_directory_iterator(path))
+      {
+        files.emplace(p.path().string(), new file_t);
+        cache_item(p.path().string());
+      }
+    }
+    void unload() {
+      for (auto& file : files) {
+        delete file.second;
+      }
+      files.clear();
+    }
+    void get(string& _path, file_t* _file) {
+      _file = files[_path];
+    }
   private:
+    void cache_item(string& _file) {
+      string deflated;
+      std::ifstream is;
+      is.open(_file.c_str(), std::ios::in | std::ios::binary);
+      if (is) {
+        std::string content((std::istreambuf_iterator<char>(is)), 
+          std::istreambuf_iterator<char>());
+        
+        files[_file]->data = content.c_str();
+        files[_file]->length = content.size();
+        files[_file]->name = fs::path(_file).filename().string();
+        util::deflate_string(content, deflated);
+        files[_file]->def_data = deflated.c_str();
+        files[_file]->def_length = deflated.size();
+        files[_file]->etag = "LLL";
+        //get last write time for the file
+        auto ftime = fs::last_write_time(fs::path(_file));
+        std::time_t cftime = decltype(ftime)::clock::to_time_t(ftime);  
+        char* lwt = ctime(&cftime);
+        lwt[strlen(lwt) - 1] = '\0';
+        files[_file]->last_write_time = lwt;
+        //get last write time for the file
+       
+        md5(lwt, files[_file]);
+        string ext = fs::path(_file).extension().string();
+
+        cache_headers(ext, files[_file]);
+        cache_def_headers(ext, files[_file]);
+
+      }
+    }
+    void md5(char* _lwt, file_t* _file) {
+      unsigned char digest[16];
+      MD5_CTX ctx;
+      MD5_Init(&ctx);
+      MD5_Update(&ctx, _lwt, strlen(_lwt));
+      MD5_Final(digest, &ctx);
+      char md5_string[33];
+      for (int i = 0; i < 16; i++)
+        sprintf(&md5_string[i * 2], "%02x", (unsigned int)digest[i]);
+
+      _file->etag = string(md5_string);
+    }
+    void cache_headers(string& extension, file_t* _file) {
+      _file->_headers += "\r\nCache-Control: public, max-age=0\r\nConnection: keep-alive\r\nServer: schmal\r\nAccept_Range: bytes\r\n";
+      util::get_header_field(util::HttpHeader::Content_Type, _file->_headers);
+      _file->_headers += util::get_mime_type(extension);
+      _file->_headers += "\r\n";
+
+      util::get_header_field(util::HttpHeader::Content_Length, _file->_headers);
+      _file->_headers += std::to_string(_file->length);
+      _file->_headers += "\r\n";
+
+      util::get_header_field(util::HttpHeader::Last_Modified, _file->_headers);
+      _file->_headers += _file->last_write_time;
+      _file->_headers += "\r\n";
+
+      util::get_header_field(util::HttpHeader::ETag, _file->_headers);
+      _file->_headers += _file->etag;
+      _file->_headers += "\r\n";
+
+    }
+    void cache_def_headers(string& extension, file_t* _file) {
+      _file->_def_headers += "\r\nCache-Control: public, max-age=0\r\nConnection: keep-alive\r\nServer: schmal\r\nAccept_Range: bytes\r\n";
+      util::get_header_field(util::HttpHeader::Content_Encoding, _file->_def_headers);
+      
+      util::get_header_field(util::HttpHeader::Content_Type, _file->_def_headers);
+     
+      _file->_def_headers += util::get_mime_type(extension);
+      _file->_def_headers += "\r\n";
+
+      util::get_header_field(util::HttpHeader::Content_Length, _file->_def_headers);
+      _file->_def_headers += std::to_string(_file->def_length);
+      _file->_def_headers += "\r\n";
+
+      util::get_header_field(util::HttpHeader::Last_Modified, _file->_def_headers);
+      _file->_def_headers += _file->last_write_time;
+      _file->_def_headers += "\r\n";
+
+      util::get_header_field(util::HttpHeader::ETag, _file->_def_headers);
+      _file->_def_headers += _file->etag;
+      _file->_def_headers += "\r\n";
+
+    }
     string path;
-    map<string, file_t> files;
-  };
-  struct http_msg_t {
-    string first_line;
-    string headers;
-    string body;
-  };
-  struct http_context_t {
-    http_context_t(tcp::socket sock,
-      config_t* cfg) : _socket(std::move(sock)),
-      _config(cfg) {}
-    request _request;
-    response _response;
-    tcp::socket _socket;
-    http_msg_t message;
-    asio::streambuf _streambuf;
-    config_t* _config;
+    map<string, file_t*> files;
   };
   struct parser
   {
     void parse(http_context_t& context)
     {
       size_t pret;
-
-      buff = (char*)context.message.first_line.c_str();
-      len = context.message.first_line.size();
+      buff = context.buffer.get();
+      len = context.buffer.length();
 
       // request line
       {
         pret = find_chars(buff, first_line, len);
-        context._request.method.append(buff, pret);
+        context.Request.method.append(buff, pret);
 
         move_buff(++pret);
         pret = find_chars(buff, first_line, len);
-        context._request.url.append(buff, pret + 1);
+        context.Request.url.append(buff, pret + 1);
 
         move_buff(++pret);
         pret = find_chars(buff, first_line, len);
-        context._request.scheme.append(buff, pret);
+        context.Request.scheme.append(buff, pret);
 
         move_buff(pret);
         pret = find_chars(buff, first_line, len);
@@ -202,8 +618,7 @@ namespace schmal
       string name, value;
       int num_zeroes = 0;
       // request headers
-      buff = (char*)context.message.headers.c_str();
-      len = context.message.headers.size();
+      
 
       while (!pret)
       {
@@ -215,10 +630,10 @@ namespace schmal
             name.append(buff, pret);
             move_buff(pret);
             pret = find_chars(buff, header_value, len);
-            move_buff(1);
-            value.append(buff, --pret);
-            move_buff(--pret);
-            context._request.headers.emplace(name, value);
+            move_buff(2); --pret; --pret;
+            value.append(buff, pret);
+            move_buff(pret);
+            context.Request.headers.emplace(name, value);
             name.clear();
             value.clear();
           }
@@ -239,9 +654,7 @@ namespace schmal
 
       // request body
       {
-        buff = (char*)context.message.body.c_str();
-        len = context.message.body.size();
-        context._request.body.append(buff);
+        context.Request.body.append(buff);
       }
       // request body
     }
@@ -249,11 +662,11 @@ namespace schmal
   private:
     char *buff;
     size_t len;
-    size_t findchar_fast(const char *str, size_t len, const char *ranges, int ranges_sz, int *found)
+    size_t findchar_fast(const char *str, size_t _len, const char *ranges, int ranges_sz, int *found)
     {
       __m128i ranges16 = _mm_loadu_si128((const __m128i *)ranges);
       const char *s = str;
-      size_t left = len & ~0xf;
+      size_t left = _len & ~0xf;
       *found = 0;
       do
       {
@@ -271,25 +684,25 @@ namespace schmal
       } while (left);
       return s - str;
     }
-    size_t find_chars(const char *str, const char *ranges, size_t len)
+    size_t find_chars(const char *str, const char *ranges, size_t _len)
     {
       const char *s;
       size_t n = 0;
-      if (len >= 16)
+      if (_len >= 16)
       {
         int found;
-        n = findchar_fast(str, len, ranges, sizeof(first_line) - 1, &found);
+        n = findchar_fast(str, _len, ranges, sizeof(first_line) - 1, &found);
         if (found)
           return n;
       }
       s = str + n;
-      while (s - str < len && uri_a[*s])
+      while (s - str < _len && uri_a[*s])
         ++s;
       return s - str;
     }
-    void move_buff(size_t len)
+    void move_buff(size_t _len)
     {
-      for (size_t i = 0; i < len; ++i)
+      for (size_t i = 0; i < _len; ++i)
       {
         ++buff;
       }
@@ -337,58 +750,31 @@ namespace schmal
     };
     struct reader_t {
       bool _ready = false;
-      reader_t(shared_ptr<http_context_t> p_http_context_t,
-        string& delim) : m_http_context_t(std::move(p_http_context_t)),
-        m_delim(delim) {}
+      reader_t(shared_ptr<http_context_t> p_http_context_t) : m_http_context_t(std::move(p_http_context_t)) {
+        data = new char[m_http_context_t->AppContext->config->max_request_size]();
+      }
       bool await_ready() noexcept { return _ready; }
       auto await_resume() {
         if (e)
           throw std::system_error(e);
-
-        using asio::buffers_begin;
-        auto bufs = m_http_context_t->_streambuf.data();
-        if (m_delim == "\r\n") {
-          m_http_context_t->message.first_line.append(buffers_begin(bufs),
-            buffers_begin(bufs) + m_http_context_t->_streambuf.size());
-        }
-        else if (m_delim == "\r\n\r\n") {
-          m_http_context_t->message.headers.append(buffers_begin(bufs),
-            buffers_begin(bufs) + m_http_context_t->_streambuf.size());
-        }
-        else {
-          m_http_context_t->message.body.append(buffers_begin(bufs),
-            buffers_begin(bufs) + m_http_context_t->_streambuf.size());
-        }
+        delete data;
         return m_http_context_t;
       }
       auto await_suspend(coroutine_handle<> coro) {
-        if (m_delim == "body") {
-          asio::async_read(m_http_context_t->_socket,
-            m_http_context_t->_streambuf,
-            asio::transfer_at_least(1),
-            [this, coro]
-          (std::error_code ec, size_t length) {
+        //this may cause problems, tried async_read_until, but it didn't read all data, added some junk characters at the end
+          m_http_context_t->Socket.async_read_some(asio::buffer(data, m_http_context_t->AppContext->config->max_request_size),
+            [this, coro](std::error_code ec, std::size_t length)
+          {
+            if (!ec) { m_http_context_t->buffer.save(data, length); }
             e = ec;
             len = length;
             _ready = true;
             coro.resume();
           });
-        }
-        else {
-          asio::async_read_until(m_http_context_t->_socket,
-            m_http_context_t->_streambuf,
-            m_delim, [this, coro]
-            (std::error_code ec, size_t length) {
-            e = ec;
-            len = length;
-            _ready = true;
-            coro.resume();
-          });
-        }
         return true;
       }
       shared_ptr<http_context_t> m_http_context_t;
-      string m_delim;
+      char* data;
       std::error_code e;
       size_t len;
     };
@@ -442,13 +828,13 @@ namespace schmal
       auto await_resume() {
         if (e)
           throw std::system_error(e);
-        m_http_context_t->_socket.shutdown(asio::ip::tcp::socket::shutdown_both, e);
-        m_http_context_t->_response.buffer.clear();
+        m_http_context_t->Socket.shutdown(asio::ip::tcp::socket::shutdown_both, e);
+        m_http_context_t->Response.buffer.clear();
         return true;
       }
       auto await_suspend(coroutine_handle<> coro) {
-        asio::async_write(m_http_context_t->_socket,
-          asio::buffer(m_http_context_t->_response.buffer.get(), m_http_context_t->_response.buffer.length()),
+        asio::async_write(m_http_context_t->Socket,
+          asio::buffer(m_http_context_t->Response.buffer.get(), m_http_context_t->Response.buffer.length()),
           [this, coro]
         (std::error_code ec, size_t length) {
           e = ec;
@@ -464,7 +850,7 @@ namespace schmal
       char* buff;
     };
   } //awaitable
-  bool web_context_t::load_config()
+  bool app_context_t::load_config()
   {
     char _cwd[PATH_BUFFER_SIZE];
     getcwd(_cwd, PATH_BUFFER_SIZE);
@@ -509,48 +895,58 @@ namespace schmal
     }
 
     // initialize config
-    cfg = new config_t;
+    config = new config_t;
 
     // read app section
-    cfg->name = configDoc["app"]["name"].GetString();
-    cfg->defaultPage = configDoc["app"]["defaultPage"].GetString();
-    cfg->apiRoute = configDoc["app"]["apiRoute"].GetString();
-    cfg->workers = configDoc["app"]["workers"].GetInt();
+    config->name = configDoc["app"]["name"].GetString();
+    config->defaultPage = configDoc["app"]["defaultPage"].GetString();
+    config->apiRoute = configDoc["app"]["apiRoute"].GetString();
+    config->workers = configDoc["app"]["workers"].GetInt();
 
-    cfg->workers = configDoc["app"]["workers"].GetInt();
-    cfg->locations.docLocation =
+    config->max_request_size = configDoc["app"]["max_request_size"].GetInt64();
+
+    config->locations.docLocation =
       configDoc["app"]["locations"]["docLocation"].GetString();
-    cfg->locations.logLocation =
+    config->locations.logLocation =
       configDoc["app"]["locations"]["logLocation"].GetString();
     if (configDoc["app"]["locations"].HasMember("uploadLocation"))
     {
-      cfg->locations.uploadLocation =
+      config->locations.uploadLocation =
         configDoc["app"]["locations"]["uploadLocation"].GetString();
     }
-    cfg->net.ip = configDoc["net"]["ip"].GetString();
-    cfg->net.port = configDoc["net"]["port"].GetString();
-    cfg->net.nodelay = configDoc["net"]["nodelay"].GetBool();
-    cfg->net.nagle = configDoc["net"]["nagle"].GetBool();
+    config->net.ip = configDoc["net"]["ip"].GetString();
+    config->net.port = configDoc["net"]["port"].GetString();
+    config->net.nodelay = configDoc["net"]["nodelay"].GetBool();
+    config->net.nagle = configDoc["net"]["nagle"].GetBool();
 
-    cfg->net.tls.version = configDoc["net"]["tls"]["version"].GetString();
-    cfg->net.tls.cert = configDoc["net"]["tls"]["cert"].GetString();
-    cfg->net.tls.key = configDoc["net"]["tls"]["key"].GetString();
+    config->net.tls.version = configDoc["net"]["tls"]["version"].GetString();
+    config->net.tls.cert = configDoc["net"]["tls"]["cert"].GetString();
+    config->net.tls.key = configDoc["net"]["tls"]["key"].GetString();
 
-    cfg->store.host = configDoc["store"]["host"].GetString();
-    cfg->store.port = configDoc["store"]["port"].GetString();
-    cfg->store.userid = configDoc["store"]["userid"].GetString();
-    cfg->store.passwd = configDoc["store"]["passwd"].GetString();
+    config->store.host = configDoc["store"]["host"].GetString();
+    config->store.port = configDoc["store"]["port"].GetString();
+    config->store.userid = configDoc["store"]["userid"].GetString();
+    config->store.passwd = configDoc["store"]["passwd"].GetString();
 
-    cfg->store.provider.name = configDoc["store"]["provider"]["name"].GetString();
-    cfg->store.provider.type = configDoc["store"]["provider"]["type"].GetString();
+    config->store.provider.name = configDoc["store"]["provider"]["name"].GetString();
+    config->store.provider.type = configDoc["store"]["provider"]["type"].GetString();
 
     return true;
   }
-  bool web_context_t::load_cache()
+  void app_context_t::load_cache()
   {
-    return true;
+    filecache = new file_cache(config->locations.docLocation);
+    filecache->load();
   }
-  void web_context_t::create()
+  api_route_handler app_context_t::get(string & handler_name)
+  {
+    return handlers[handler_name];
+  }
+  void app_context_t::add_route_handler(string handler_name, api_route_handler handler)
+  {
+    handlers.emplace(handler_name, handler);
+  }
+  void app_context_t::create()
   {
     load_config();
     load_cache();
@@ -558,8 +954,9 @@ namespace schmal
   auto accept(tcp::acceptor& a) {
     return awaitable::acceptor_t{ a };
   }
-  auto read(shared_ptr<http_context_t> p_http_context_t, string delim) {
-    return awaitable::reader_t{ p_http_context_t, delim };
+  auto read(shared_ptr<http_context_t> p_http_context_t) {
+    awaitable::reader_t r(p_http_context_t);
+    return awaitable::reader_t{ p_http_context_t };
   }
   auto parse(shared_ptr<http_context_t> p_http_context_t) {
     return awaitable::parser_t{ p_http_context_t };
@@ -603,11 +1000,11 @@ namespace schmal
         std::cout << "error: " << e.what() << std::endl;
       }
     }
-    task read_body(shared_ptr<http_context_t> p_http_context_t)
+    task read_request(shared_ptr<http_context_t> p_http_context_t)
     {
       try
       {
-        auto ret = co_await schmal::read(p_http_context_t, string("body"));
+        auto ret = co_await schmal::read(p_http_context_t);
         schmal::http::parse_request(p_http_context_t);
       }
       catch (std::exception& e)
@@ -615,42 +1012,18 @@ namespace schmal
         std::cout << "error: " << e.what() << std::endl;
       }
     }
-    task read_headers(shared_ptr<http_context_t> p_http_context_t)
-    {
-      try
-      {
-        auto ret = co_await schmal::read(p_http_context_t, string("\r\n\r\n"));
-        schmal::http::read_body(p_http_context_t);
-      }
-      catch (std::exception& e)
-      {
-        std::cout << "error: " << e.what() << std::endl;
-      }
-    }
-    task read_first_line(shared_ptr<http_context_t> p_http_context_t)
-    {
-      try
-      {
-        auto ret = co_await schmal::read(p_http_context_t, string("\r\n"));
-        schmal::http::read_headers(p_http_context_t);
-      }
-      catch (std::exception& e)
-      {
-        std::cout << "error: " << e.what() << std::endl;
-      }
-    }
-    task accept(asio::io_context& io, web_context_t* wct)
+    task accept(asio::io_context& io, app_context_t* wct)
     {
       asio::ip::tcp::resolver resolver{ io };
-      asio::ip::tcp::endpoint endpoint = *resolver.resolve(wct->cfg->net.ip, wct->cfg->net.port).begin();
+      asio::ip::tcp::endpoint endpoint = *resolver.resolve(wct->config->net.ip, wct->config->net.port).begin();
       asio::ip::tcp::acceptor acceptor{ io, endpoint };
       acceptor.set_option(asio::ip::tcp::acceptor::reuse_address(true));
       asio::ip::tcp::socket sock{ io };
       for (; ;)
       {
-        auto sock = co_await schmal::accept(acceptor);
-        auto _context = make_shared<http_context_t>(std::move(sock), wct->cfg);
-        schmal::http::read_first_line(_context);
+        auto _sock = co_await schmal::accept(acceptor);
+        auto _context = make_shared<http_context_t>(std::move(_sock), wct);
+        schmal::http::read_request(_context);
       }
     }
   }
@@ -659,8 +1032,11 @@ namespace schmal
 int main()
 {
   asio::io_context io;
-  schmal::web_context_t* wct = new schmal::web_context_t;
+  schmal::app_context_t* wct = new schmal::app_context_t;
   wct->create();
+  wct->add_route_handler("/hello", [](schmal::http_context_t* context) {
+     
+  });
   schmal::http::accept(io, wct);
   io.run();
 

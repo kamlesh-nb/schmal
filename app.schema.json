@@ -24,6 +24,10 @@
           "description": "number of worker threads to run",
           "type": "integer"
         },
+        "max_request_size": {
+          "description": "maximum request size",
+          "type": "number"
+        },
         "locations": {
           "description": "locations for resources on the server",
           "type": "object",
@@ -49,6 +53,7 @@
         "defaultPage",
         "apiRoute",
         "workers",
+        "max_request_size",
         "locations"
       ],
       "additionalProperties": false

@@ -4,6 +4,12 @@
 #include <map>
 #include <string>
 
+#include <asio.hpp>
+#include <asio/ssl.hpp>
+#include <asio/ts/buffer.hpp>
+#include <asio/ts/internet.hpp>
+
+using asio::ip::tcp;
 using namespace std;
 
 namespace schmal {
@@ -59,6 +65,7 @@ namespace schmal {
     int length() { return _len; }
     void clear()
     {
+      if (_len == 0) return;
       _curpos = 0;
       _len = 0;
       free(_base);
@@ -78,6 +85,8 @@ namespace schmal {
     string get_header(string&);
     string get_cookie(string&);
     bool api;
+  private:
+    io_buff_t buffer;
   };
   struct response
   {
@@ -85,13 +94,41 @@ namespace schmal {
     map<string, string> headers;
     map<string, string> cookies;
     string body;
-    io_buff_t buffer;
+    
     void add_header(string&, string&);
     void add_cookie(string&, string&);
     void create();
+    io_buff_t buffer;
   };
   struct parser;
   struct file_cache;
+  struct http_context_t;
+  typedef std::function<void(http_context_t*)> api_route_handler;
+  struct app_context_t
+  {
+    app_context_t() {}
+    void create();
+    bool load_config();
+    void load_cache();
+    config_t* config;
+    file_cache* filecache;
+    api_route_handler get(string& handler_name);
+    void add_route_handler(string handler_name, api_route_handler handler);
+  private:
+    map<string, api_route_handler> handlers;
+  };
+  struct http_context_t {
+    http_context_t(tcp::socket sock,
+      app_context_t* cfg) : Socket(std::move(sock)),
+      AppContext(cfg) {
+      buffer.create(1024);
+    }
+    request Request;
+    response Response;
+    tcp::socket Socket;
+    app_context_t* AppContext;
+    io_buff_t buffer;
+  };
   namespace awaitable {
     struct acceptor_t;
     struct reader_t;
@@ -99,21 +136,13 @@ namespace schmal {
     struct parser_t;
     struct process_t;
   }
-  struct web_context_t
-  {
-    web_context_t() {}
-    void create();
-    bool load_config();
-    bool load_cache();
-    config_t* cfg;
-    file_cache* fc;
-  };
   namespace http {
 
   }
   namespace https {
 
   }
+
 }
 
 #endif //SCHMAL_H
